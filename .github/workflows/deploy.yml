@@ -13,14 +13,19 @@ jobs:
     steps:
       - name: SSH로 EC2 접속하기
         uses: appleboy/ssh-action@v1
+        env:
+          ENV: ${{ secrets.ENV }}
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USERNAME }}
           key: ${{ secrets.EC2_PEM_KEY }}
+          envs: ENV
           script: |
             set -e
             cd /home/ubuntu/fesi13-ci-cd-simulation
+            rm -rf .env
             git pull origin main
+            echo "$ENV" > .env
             pm2 kill
             npm ci
             npm run build
