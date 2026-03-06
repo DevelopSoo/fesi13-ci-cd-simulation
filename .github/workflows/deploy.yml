@@ -11,22 +11,49 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - name: SSH로 EC2 접속하기
-        uses: appleboy/ssh-action@v1
-        env:
-          ENV: ${{ secrets.ENV }}
+      - name: Github Repository 파일 가져오기
+        uses: actions/checkout@v5
+
+      - name: Node.js 설치하기
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+
+      - name: 의존성(라이브러리) 설치
+        run: npm ci
+
+      - name: .env 파일 생성
+        run: echo "${{ secrets.ENV }}" > .env
+
+      - name: 빌드
+        run: npm run build
+
+      - name: 압축
+        # NODE_MODULES 폴더는 압축하지 않는다.
+        run: tar -czvf nextjs-aws-test.tar.gz .next .env package.json package-lock.json
+
+      - name: SCP로 EC2로 빌드된 파일을 전송한다.
+        uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USERNAME }}
           key: ${{ secrets.EC2_PEM_KEY }}
-          envs: ENV
+          source: nextjs-aws-test.tar.gz
+          target: /home/ubuntu/nextjs-aws-test/build
+
+      - name: SSH로 EC2 접속하기
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USERNAME }}
+          key: ${{ secrets.EC2_PEM_KEY }}
           script: |
             set -e
-            cd /home/ubuntu/fesi13-ci-cd-simulation
-            rm -rf .env
-            git pull origin main
-            echo "$ENV" > .env
-            pm2 kill
+            rm -rf /home/ubuntu/nextjs-aws-test/current
+            mkdir /home/ubuntu/nextjs-aws-test/current
+            mv /home/ubuntu/nextjs-aws-test/build/nextjs-aws-test.tar.gz /home/ubuntu/nextjs-aws-test/current/nextjs-aws-test.tar.gz
+            cd /home/ubuntu/nextjs-aws-test/current
+            tar -xvf nextjs-aws-test.tar.gz
             npm ci
-            npm run build
+            pm2 kill
             pm2 start npm --name "nextjs-app" -- start
