@@ -1,0 +1,27 @@
+# .github/workflows/deploy.yml
+
+name: EC2로 자동배포하기
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: SSH로 EC2 접속하기
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USERNAME }}
+          key: ${{ secrets.EC2_PEM_KEY }}
+          script: |
+            set -e
+            cd /home/ubuntu/nextjs-aws-test 
+            git pull origin main
+            pm2 kill
+            npm ci
+            npm run build
+            pm2 start npm --name "nextjs-app" -- start
