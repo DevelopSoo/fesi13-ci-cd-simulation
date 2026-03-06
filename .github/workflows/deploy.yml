@@ -19,7 +19,7 @@ jobs:
           key: ${{ secrets.EC2_PEM_KEY }}
           script: |
             set -e
-            cd /home/ubuntu/nextjs-aws-test 
+            cd /home/ubuntu/fesi13-ci-cd-simulation
             git pull origin main
             pm2 kill
             npm ci
