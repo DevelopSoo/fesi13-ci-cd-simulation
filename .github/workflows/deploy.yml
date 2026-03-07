@@ -14,10 +14,10 @@ jobs:
       - name: Github Repository 파일 가져오기
         uses: actions/checkout@v5
 
-      - name: Node.js 설치하기
+      - name: Node 설치
         uses: actions/setup-node@v6
         with:
-          node-version: "24"
+          node-version: 24
 
       - name: 의존성(라이브러리) 설치
         run: npm ci
@@ -25,38 +25,41 @@ jobs:
       - name: .env 파일 생성
         run: echo "${{ secrets.ENV }}" > .env
 
-      - name: 빌드
-        run: npm run build
+      - name: 테스트
+        run: echo "테스트" # 실제로는 npm run test 하면 됨
 
-      - name: 압축
-        # NODE_MODULES 폴더는 압축하지 않는다.
-        # 커밋 해시를 파일명으로 사용하여 고유한 파일명을 생성한다.
-        run: tar -czvf $GITHUB_SHA.tar.gz appspec.yml scripts .next .env package.json package-lock.json
-
-      - name: AWS 서비스에 접근할 수 있게 AWS credentials 설정
+      # Github Actions가 AWS에 접근할 수 있게 인증
+      - name: AWS Resource에 접근할 수 있게 AWS credentials 설정
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-region: ap-northeast-2
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
 
-      - name: S3에 프로젝트 폴더 업로드하기
-        # aws s3 명령어
-        # cp: 파일 복사
-        # --region: 지역
-        # ./$GITHUB_SHA.tar.gz: github actions에서 복사할 파일 경로
-        # s3://codeit-nextjs-aws-test-storage/$GITHUB_SHA.tar.gz: S3에 복사할 위치
-        run: aws s3 cp --region ap-northeast-2 ./$GITHUB_SHA.tar.gz s3://fesi13-storage/$GITHUB_SHA.tar.gz
+      # Github Actions에 부여했던 권한을 확인 후 ECR에 로그인함
+      - name: ECR에 로그인하기
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Code Deploy를 활용해 EC2에 프로젝트 코드 배포
-        # aws deploy 명령어
-        # create-deployment: 배포 생성 -> 원래는 codeDeploy의 애플리케이션 -> 배포 그룹 -> 배포 생성을 통해서 할 수 있는 걸 CLI 로 작성하는 것
-        # --application-name: 배포할 애플리케이션 이름
-        # --deployment-config-name: 배포 구성
-        # --deployment-group-name: 배포 그룹
-        # --s3-location: 배포할 파일 위치
-        run: aws deploy create-deployment
-          --application-name nextjs-aws
-          --deployment-config-name CodeDeployDefault.AllAtOnce
-          --deployment-group-name Production
-          --s3-location bucket=fesi13-storage,bundleType=tgz,key=$GITHUB_SHA.tar.gz
+      - name: Docker 이미지 생성
+        run: docker build -t nextjs-aws-test .
+
+      # steps.login-ecr.outputs.registry 를 설정하여 이름 붙이기 & 목적지 설정을 함
+      - name: Docker 이미지에 Tag 붙이기
+        run: docker tag nextjs-aws-test ${{ steps.login-ecr.outputs.registry }}/codeit-nextjs-ecr-repo:latest
+
+      - name: ECR에 Docker 이미지 Push하기
+        run: docker push ${{ steps.login-ecr.outputs.registry }}/codeit-nextjs-ecr-repo:latest
+
+      - name: SSH로 EC2에 접속하기
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USERNAME }}
+          key: ${{ secrets.EC2_PEM_KEY }}
+          script: |
+            set -e
+            docker stop nextjs-aws-test || true
+            docker rm nextjs-aws-test || true
+            docker pull ${{ steps.login-ecr.outputs.registry }}/codeit-nextjs-ecr-repo:latest
+            docker run -d --name nextjs-aws-test -p 3000:3000 ${{ steps.login-ecr.outputs.registry }}/codeit-nextjs-ecr-repo:latest
